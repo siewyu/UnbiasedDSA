@@ -1,5 +1,6 @@
 numpy
 pandas
 Pillow
+pillow-heif
 opencv-python
 pathlib2
