@@ -87,7 +87,8 @@ def create_labels_csv(image_folder, output_path='labels.csv'):
     print(f"\n{'='*60}")
     print(f"Created {output_path}")
     print(f"Total images with labels: {len(df)}")
-    print(f"HgB range: {df['hgb'].min():.1f} - {df['hgb'].max():.1f} g/dL")
+    if len(df) > 0:
+        print(f"HgB range: {df['hgb'].min():.1f} - {df['hgb'].max():.1f} g/dL")
     print(f"{'='*60}\n")
     
     return df
@@ -95,9 +96,7 @@ def create_labels_csv(image_folder, output_path='labels.csv'):
 def extract_exif_metadata(image_path):
     """
     Extract EXIF metadata from image following competition convention.
-    Creates metadata matching: image_id, device_id, device_brand, device_model, 
-    iso_bucket, exposure_bucket, wb_bucket, ambient_light, distance_band, 
-    skin_tone_proxy, age_band, gender
+    Enhanced to extract more device information including camera type.
     """
     metadata = {
         'image_id': image_path.stem
@@ -121,83 +120,171 @@ def extract_exif_metadata(image_path):
         iso_value = None
         exposure_time = None
         white_balance = None
+        lens_make = None
+        lens_model = None
+        focal_length = None
         
         if exif_data:
             for tag_id, value in exif_data.items():
                 tag = TAGS.get(tag_id, tag_id)
+                
+                # Device information
                 if tag == 'Make':
-                    device_brand = str(value)
+                    device_brand = str(value).strip()
                 elif tag == 'Model':
-                    device_model = str(value)
-                elif tag == 'ISOSpeedRatings' or tag == 'ISO':
+                    device_model = str(value).strip()
+                elif tag == 'LensMake':
+                    lens_make = str(value).strip()
+                elif tag == 'LensModel':
+                    lens_model = str(value).strip()
+                
+                # Camera settings
+                elif tag == 'ISOSpeedRatings' or tag == 'ISO' or tag == 'PhotographicSensitivity':
                     iso_value = value
                 elif tag == 'ExposureTime':
                     exposure_time = value
                 elif tag == 'WhiteBalance':
                     white_balance = value
+                elif tag == 'FocalLength':
+                    focal_length = value
+                
+                # Print all tags for debugging (optional - comment out after testing)
+                # print(f"  {tag}: {value}")
+        
+        # Detect camera type (front/back/selfie)
+        camera_type = "unknown"
+        
+        # Method 1: Check lens model for front camera indicators
+        if lens_model:
+            lens_lower = lens_model.lower()
+            if any(keyword in lens_lower for keyword in ['front', 'selfie', 'facetime']):
+                camera_type = "front"
+            else:
+                camera_type = "back"
+        
+        # Method 2: Check focal length (front cameras typically < 3mm)
+        elif focal_length:
+            try:
+                if isinstance(focal_length, tuple):
+                    fl_value = focal_length[0] / focal_length[1]
+                else:
+                    fl_value = float(focal_length)
+                
+                # Typical front camera: 1.5-3mm, back camera: 4-30mm on phones
+                if fl_value < 3.5:
+                    camera_type = "front"
+                else:
+                    camera_type = "back"
+            except:
+                pass
+        
+        # Method 3: Check device model for known patterns
+        elif device_model:
+            model_lower = device_model.lower()
+            # Some devices encode camera type in model string
+            if 'front' in model_lower:
+                camera_type = "front"
         
         # Set required metadata fields
-        metadata['device_id'] = f"{device_brand}_{device_model}".replace(" ", "_")
+        device_id_parts = [device_brand, device_model]
+        if camera_type != "unknown":
+            device_id_parts.append(camera_type)
+        
+        metadata['device_id'] = "_".join(device_id_parts).replace(" ", "_")
         metadata['device_brand'] = device_brand
         metadata['device_model'] = device_model
+        metadata['camera_type'] = camera_type  # NEW FIELD
+        
+        # Add lens info if available
+        if lens_make or lens_model:
+            metadata['lens_info'] = f"{lens_make or ''} {lens_model or ''}".strip()
+        else:
+            metadata['lens_info'] = "unknown"
         
         # Create ISO bucket
         if iso_value:
-            if iso_value <= 100:
-                metadata['iso_bucket'] = "low"
-            elif iso_value <= 400:
-                metadata['iso_bucket'] = "medium"
-            else:
-                metadata['iso_bucket'] = "high"
+            try:
+                iso_val = int(iso_value) if not isinstance(iso_value, (list, tuple)) else int(iso_value[0])
+                if iso_val <= 100:
+                    metadata['iso_bucket'] = "low"
+                elif iso_val <= 400:
+                    metadata['iso_bucket'] = "medium"
+                else:
+                    metadata['iso_bucket'] = "high"
+            except:
+                metadata['iso_bucket'] = "unknown"
         else:
             metadata['iso_bucket'] = "unknown"
         
         # Create exposure bucket
         if exposure_time:
-            if isinstance(exposure_time, str) and '/' in exposure_time:
-                # Handle fractional exposure times like "1/60"
-                parts = exposure_time.split('/')
-                exp_val = float(parts[0]) / float(parts[1])
-            else:
-                exp_val = float(exposure_time)
-            
-            if exp_val >= 1/30:
-                metadata['exposure_bucket'] = "slow"
-            elif exp_val >= 1/125:
-                metadata['exposure_bucket'] = "medium"
-            else:
-                metadata['exposure_bucket'] = "fast"
+            try:
+                if isinstance(exposure_time, tuple):
+                    exp_val = exposure_time[0] / exposure_time[1]
+                elif isinstance(exposure_time, str) and '/' in exposure_time:
+                    parts = exposure_time.split('/')
+                    exp_val = float(parts[0]) / float(parts[1])
+                else:
+                    exp_val = float(exposure_time)
+                
+                if exp_val >= 1/30:
+                    metadata['exposure_bucket'] = "slow"
+                elif exp_val >= 1/125:
+                    metadata['exposure_bucket'] = "medium"
+                else:
+                    metadata['exposure_bucket'] = "fast"
+            except:
+                metadata['exposure_bucket'] = "unknown"
         else:
             metadata['exposure_bucket'] = "unknown"
         
         # Create white balance bucket
-        if white_balance:
-            if white_balance == 0:
-                metadata['wb_bucket'] = "auto"
-            elif white_balance == 1:
-                metadata['wb_bucket'] = "daylight"
-            else:
-                metadata['wb_bucket'] = "manual"
+        if white_balance is not None:
+            try:
+                wb_val = int(white_balance)
+                if wb_val == 0:
+                    metadata['wb_bucket'] = "auto"
+                elif wb_val == 1:
+                    metadata['wb_bucket'] = "manual"
+                else:
+                    metadata['wb_bucket'] = "other"
+            except:
+                metadata['wb_bucket'] = "unknown"
         else:
             metadata['wb_bucket'] = "unknown"
         
-        # Placeholder fields (these would need manual annotation or inference)
-        metadata['ambient_light'] = "unknown"  # bright/indoor/warm/cool
-        metadata['distance_band'] = "unknown"  # close/medium/far
-        metadata['skin_tone_proxy'] = "unknown"  # Fitzpatrick I-VI proxy
-        metadata['age_band'] = "unknown"  # age bands
-        metadata['gender'] = "unknown"  # gender
+        # Store focal length info
+        if focal_length:
+            try:
+                if isinstance(focal_length, tuple):
+                    fl_value = focal_length[0] / focal_length[1]
+                else:
+                    fl_value = float(focal_length)
+                metadata['focal_length_mm'] = round(fl_value, 2)
+            except:
+                metadata['focal_length_mm'] = "unknown"
+        else:
+            metadata['focal_length_mm'] = "unknown"
+        
+        # Placeholder fields (manual annotation needed)
+        metadata['ambient_light'] = "unknown"
+        metadata['distance_band'] = "unknown"
+        metadata['skin_tone_proxy'] = "unknown"
+        metadata['age_band'] = "unknown"
+        metadata['gender'] = "unknown"
         
     except Exception as e:
         print(f"Warning: Could not extract EXIF from {image_path.name}: {e}")
-        # Set default values on error
         metadata.update({
             'device_id': "unknown",
             'device_brand': "unknown", 
             'device_model': "unknown",
+            'camera_type': "unknown",
+            'lens_info': "unknown",
             'iso_bucket': "unknown",
             'exposure_bucket': "unknown", 
             'wb_bucket': "unknown",
+            'focal_length_mm': "unknown",
             'ambient_light': "unknown",
             'distance_band': "unknown",
             'skin_tone_proxy': "unknown", 
@@ -207,80 +294,9 @@ def extract_exif_metadata(image_path):
     
     return metadata
 
-def extract_color_metadata(image_path):
-    """
-    Extract color-based metadata from image.
-    Handles HEIC files by converting through PIL first.
-    """
-    try:
-        # Handle HEIC files
-        if str(image_path).lower().endswith('.heic'):
-            # Use PIL to read HEIC, then convert to numpy array
-            pil_img = Image.open(image_path).convert('RGB')
-            img_rgb = np.array(pil_img)
-            # Convert to BGR for OpenCV functions
-            img = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-        else:
-            # Read image normally
-            img = cv2.imread(str(image_path))
-            if img is None:
-                raise ValueError(f"Could not read image: {image_path}")
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        
-        # RGB statistics
-        mean_r = np.mean(img_rgb[:, :, 0])
-        mean_g = np.mean(img_rgb[:, :, 1])
-        mean_b = np.mean(img_rgb[:, :, 2])
-        
-        std_r = np.std(img_rgb[:, :, 0])
-        std_g = np.std(img_rgb[:, :, 1])
-        std_b = np.std(img_rgb[:, :, 2])
-        
-        # HSV statistics
-        img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        mean_h = np.mean(img_hsv[:, :, 0])
-        mean_s = np.mean(img_hsv[:, :, 1])
-        mean_v = np.mean(img_hsv[:, :, 2])
-        
-        # LAB color space (better for color perception)
-        img_lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-        mean_l = np.mean(img_lab[:, :, 0])
-        mean_a = np.mean(img_lab[:, :, 1])
-        mean_b_lab = np.mean(img_lab[:, :, 2])
-        
-        # Color ratios (important for hemoglobin)
-        rg_ratio = mean_r / (mean_g + 1e-6)
-        rb_ratio = mean_r / (mean_b + 1e-6)
-        
-        # Brightness estimate
-        brightness = 0.299 * mean_r + 0.587 * mean_g + 0.114 * mean_b
-        
-        return {
-            'mean_r': round(mean_r, 2),
-            'mean_g': round(mean_g, 2),
-            'mean_b': round(mean_b, 2),
-            'std_r': round(std_r, 2),
-            'std_g': round(std_g, 2),
-            'std_b': round(std_b, 2),
-            'mean_h': round(mean_h, 2),
-            'mean_s': round(mean_s, 2),
-            'mean_v': round(mean_v, 2),
-            'mean_l': round(mean_l, 2),
-            'mean_a': round(mean_a, 2),
-            'mean_b_lab': round(mean_b_lab, 2),
-            'rg_ratio': round(rg_ratio, 4),
-            'rb_ratio': round(rb_ratio, 4),
-            'brightness': round(brightness, 2)
-        }
-    except Exception as e:
-        print(f"Warning: Could not extract color metadata from {image_path.name}: {e}")
-        return {}
-
 def create_metadata_csv(image_folder, output_path='meta.csv'):
     """
-    Create meta.csv following competition convention:
-    image_id, device_id, device_brand, device_model, iso_bucket, exposure_bucket, 
-    wb_bucket, ambient_light, distance_band, skin_tone_proxy, age_band, gender
+    Create meta.csv with enhanced metadata extraction.
     """
     image_folder = Path(image_folder)
     
@@ -297,18 +313,29 @@ def create_metadata_csv(image_folder, output_path='meta.csv'):
     for img_path in sorted(image_files):
         print(f"Processing: {img_path.name}")
         
-        # Get EXIF metadata in competition format
+        # Get EXIF metadata
         metadata = extract_exif_metadata(img_path)
+        
+        # Show extracted info
+        if metadata['device_brand'] != "Unknown":
+            print(f"  Device: {metadata['device_brand']} {metadata['device_model']}")
+        if metadata['camera_type'] != "unknown":
+            print(f"  Camera: {metadata['camera_type']}")
+        if metadata['lens_info'] != "unknown":
+            print(f"  Lens: {metadata['lens_info']}")
+        
         metadata_list.append(metadata)
     
-    # Create DataFrame with specific column order
+    # Create DataFrame
     df = pd.DataFrame(metadata_list)
     
-    # Ensure columns are in the expected order
+    # Define column order - now includes new fields
     expected_columns = [
         'image_id', 'device_id', 'device_brand', 'device_model', 
-        'iso_bucket', 'exposure_bucket', 'wb_bucket', 'ambient_light', 
-        'distance_band', 'skin_tone_proxy', 'age_band', 'gender'
+        'camera_type', 'lens_info', 'focal_length_mm',
+        'iso_bucket', 'exposure_bucket', 'wb_bucket', 
+        'ambient_light', 'distance_band', 'skin_tone_proxy', 
+        'age_band', 'gender'
     ]
     
     # Reorder columns and fill missing ones
@@ -320,19 +347,19 @@ def create_metadata_csv(image_folder, output_path='meta.csv'):
     df.to_csv(output_path, index=False)
     
     print(f"\n{'='*60}")
-    print(f"Created {output_path} (following competition convention)")
+    print(f"Created {output_path}")
     print(f"Total images: {len(df)}")
-    print(f"Columns: {list(df.columns)}")
     print(f"{'='*60}\n")
     
-    # Show sample
-    print("Sample metadata (first 3 rows):")
-    print(df.head(3).to_string())
+    # Show sample with key fields
+    if len(df) > 0:
+        print("Sample metadata:")
+        print(df[['image_id', 'device_brand', 'device_model', 'camera_type', 'focal_length_mm']].head(3).to_string())
     
     return df
 
-def create_combined_dataset(image_folder, labels_csv='labels.csv', 
-                           metadata_csv='meta.csv', 
+def create_combined_dataset(image_folder, labels_csv, 
+                           metadata_csv, 
                            output_csv='combined_data.csv'):
     """
     Combine labels and metadata into a single CSV.
@@ -362,45 +389,55 @@ if __name__ == "__main__":
     print("="*60)
     print()
     
-    # SET YOUR IMAGE FOLDER PATH HERE
-    IMAGE_FOLDER = r""
+    # Define paths
+    DATA_FOLDER = Path("../data")
+    IMAGE_FOLDER = DATA_FOLDER / "images"
     
-    # Check if folder exists
-    if not os.path.exists(IMAGE_FOLDER):
-        print(f"ERROR: Folder not found: {IMAGE_FOLDER}")
-        print("Please update IMAGE_FOLDER path in the script.")
+    # Check and create data folder structure
+    if not DATA_FOLDER.exists():
+        print(f"Creating data folder: {DATA_FOLDER}")
+        DATA_FOLDER.mkdir(parents=True, exist_ok=True)
+        print("✓ Data folder created")
+    else:
+        print(f"✓ Data folder exists: {DATA_FOLDER}")
+    
+    # Check if images folder exists
+    if not IMAGE_FOLDER.exists():
+        print(f"\nERROR: Images folder not found: {IMAGE_FOLDER}")
+        print("Please create the folder and place your images there:")
+        print(f"  mkdir {IMAGE_FOLDER}")
         exit(1)
+    
+    # Define output paths in data folder
+    labels_path = DATA_FOLDER / "labels.csv"
+    meta_path = DATA_FOLDER / "meta.csv"
+    combined_path = DATA_FOLDER / "combined_data.csv"
     
     # STEP 1: Extract labels
     print("\n[STEP 1] Extracting HgB labels from filenames...")
     print("-" * 60)
-    labels_df = create_labels_csv(IMAGE_FOLDER, output_path='labels.csv')
+    labels_df = create_labels_csv(IMAGE_FOLDER, output_path=labels_path)
     
     # STEP 2: Extract metadata
     print("\n[STEP 2] Extracting image metadata...")
     print("-" * 60)
-    metadata_df = create_metadata_csv(
-        IMAGE_FOLDER, 
-        output_path='meta.csv'
-    )
+    metadata_df = create_metadata_csv(IMAGE_FOLDER, output_path=meta_path)
     
     # STEP 3: Create combined dataset
     print("\n[STEP 3] Creating combined dataset...")
     print("-" * 60)
     combined_df = create_combined_dataset(
         IMAGE_FOLDER,
-        labels_csv='labels.csv',
-        metadata_csv='meta.csv',
-        output_csv='combined_data.csv'
+        labels_csv=labels_path,
+        metadata_csv=meta_path,
+        output_csv=combined_path
     )
     
     # Summary
     print("\n" + "="*60)
     print("EXTRACTION COMPLETE!")
     print("="*60)
-    print("\nFiles created:")
-    print("  1. labels.csv - HgB labels for each image (image_id, hgb)")
-    print("  2. meta.csv - Image metadata following competition convention")
-    print("  3. combined_data.csv - Combined labels + metadata")
-    print("\nYou can now use these CSV files for your analysis!")
-    print("="*60)
+    print("\nFiles created in data folder:")
+    print(f"  1. {labels_path} - HgB labels for each image")
+    print(f"  2. {meta_path} - Image metadata")
+    print(f"  3. {combined_path} - Combined labels + metadata")
