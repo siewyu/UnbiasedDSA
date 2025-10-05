@@ -62,24 +62,6 @@ Some metadata fields are set to "unknown" and require manual annotation:
 - `age_band` - age ranges
 - `gender` - gender categories
 
-### 7. Git Best Practices
-
-**📁 What's tracked in Git:**
-
-- Source code (`extractdata.py`, etc.)
-- Documentation (`README.md`)
-- Dependencies (`requirements.txt`)
-- Configuration files
-
-**🚫 What's NOT tracked (in `.gitignore`):**
-
-- Generated CSV files (`*.csv`)
-- Image data files (`*.jpg`, `*.heic`, etc.)
-- Python cache files (`__pycache__/`)
-- Virtual environments
-
-This keeps your repository clean and avoids pushing large data files to GitHub.
-
 ### Troubleshooting
 
 If you encounter issues with HEIC files:
