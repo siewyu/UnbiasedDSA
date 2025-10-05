@@ -12,14 +12,16 @@ from PIL.ExifTags import TAGS
 import cv2
 import numpy as np
 
-# Enable HEIC support
+# CRITICAL: Enable HEIC support BEFORE any image operations
 try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
-    print("HEIC support enabled")
+    print("✓ HEIC support enabled\n")
 except ImportError:
-    print("pillow-heif not installed. HEIC files may not work properly.")
+    print("ERROR: pillow-heif not installed. HEIC files will fail.")
     print("Install with: pip install pillow-heif")
+    print()
+    exit(1)  # Exit if HEIC support isn't available
 
 def extract_hgb_from_filename(filename):
     """
@@ -104,141 +106,160 @@ def create_labels_csv(image_folder, output_path='labels.csv'):
 
 def extract_exif_metadata(image_path):
     """
-    Extract EXIF metadata from image following competition convention.
-    Enhanced to extract more device information including camera type.
+    Extract EXIF metadata from image with robust HEIC support.
     """
     metadata = {
         'image_id': image_path.stem
     }
     
+    # Initialize all variables at the start
+    camera_type = "unknown"
+    device_brand = "Unknown"
+    device_model = "Unknown"
+    iso_value = None
+    exposure_time = None
+    white_balance = None
+    lens_make = None
+    lens_model = None
+    focal_length = None
+    
     try:
         img = Image.open(image_path)
         
-        # Handle different EXIF extraction methods, especially for HEIC
-        exif_data = None
+        # Get EXIF data
+        exif_data = {}
         
-        # Method 1: Try modern getexif() first (better for HEIC)
         try:
             exif_dict = img.getexif()
             if exif_dict:
-                exif_data = dict(exif_dict)
-                print(f"Found {len(exif_data)} EXIF tags using getexif()")
-        except:
-            pass
+                # Get main EXIF data
+                for tag_id, value in exif_dict.items():
+                    decoded_tag = TAGS.get(tag_id, tag_id)
+                    exif_data[decoded_tag] = value
+                
+                # CRITICAL: Get IFD data which contains lens/camera info for iPhones
+                try:
+                    # EXIF IFD (0x8769) contains detailed camera settings
+                    exif_ifd = exif_dict.get_ifd(0x8769)
+                    for tag_id, value in exif_ifd.items():
+                        decoded_tag = TAGS.get(tag_id, tag_id)
+                        if decoded_tag not in exif_data:
+                            exif_data[decoded_tag] = value
+                except:
+                    pass
+                
+                print(f"  Extracted {len(exif_data)} EXIF fields")
+        except Exception as e:
+            print(f"  EXIF extraction error: {e}")
+        
+        # Extract device info
+        for tag, value in exif_data.items():
+            tag_str = str(tag)
+            value_str = str(value).strip()
             
-        # Method 2: Try legacy _getexif() as fallback
-        if not exif_data:
+            # Camera maker
+            if tag in ['Make', 'make']:
+                device_brand = value_str
+            
+            # Camera model - this is KEY for iPhones
+            elif tag in ['Model', 'model']:
+                device_model = value_str
+            
+            # Lens make
+            elif tag in ['LensMake', 'lens_make']:
+                lens_make = value_str
+            
+            # Lens model - CRITICAL for iPhone camera type detection
+            elif tag in ['LensModel', 'lens_model', 'LensInfo']:
+                lens_model = value_str
+                print(f"  Found lens_model: {lens_model}")
+            
+            # Camera settings
+            elif tag in ['ISOSpeedRatings', 'ISO', 'PhotographicSensitivity']:
+                iso_value = value
+            elif tag in ['ExposureTime', 'exposure_time']:
+                exposure_time = value
+            elif tag in ['WhiteBalance', 'white_balance']:
+                white_balance = value
+            elif tag in ['FocalLength', 'focal_length']:
+                focal_length = value
+        
+        # Detect camera type from lens model (most reliable for iPhones)
+        if lens_model:
+            lens_lower = lens_model.lower()
+            
+            # iPhone patterns: "iPhone 15 Pro Max front TrueDepth camera"
+            if 'front' in lens_lower or 'truedepth' in lens_lower or 'facetime' in lens_lower:
+                camera_type = "front"
+            elif 'back' in lens_lower or 'rear' in lens_lower:
+                camera_type = "back"
+            # Check for specific lens types
+            elif any(x in lens_lower for x in ['main', 'wide', 'telephoto', 'ultra']):
+                camera_type = "back"
+        
+        # Fallback: Use focal length to detect camera type
+        if camera_type == "unknown" and focal_length:
             try:
-                legacy_exif = img._getexif()
-                if legacy_exif:
-                    exif_data = legacy_exif
-                    print(f"Found {len(exif_data)} EXIF tags using _getexif()")
+                if isinstance(focal_length, tuple):
+                    fl_value = focal_length[0] / focal_length[1]
+                else:
+                    fl_value = float(focal_length)
+                
+                # iPhone front cameras: ~2.71mm, back cameras: 1.5-9mm
+                # 3mm is a good threshold
+                if fl_value < 3.5:
+                    camera_type = "front"
+                else:
+                    camera_type = "back"
+                    
+                print(f"  Focal length: {fl_value}mm -> camera_type: {camera_type}")
             except:
                 pass
         
-        # Method 3: Try to get all available info including lens data
-        try:
-            # Get additional metadata that might contain lens info
-            if hasattr(img, 'tag'):
-                additional_data = img.tag
-                if additional_data and not exif_data:
-                    exif_data = additional_data
-                    print(f"Found metadata using img.tag")
-        except:
-            pass
+        # Clean up device brand/model
+        if device_brand and 'apple' in device_brand.lower():
+            device_brand = "Apple"
         
-        # Initialize with default values
-        device_brand = "Unknown"
-        device_model = "Unknown"
-        iso_value = None
-        exposure_time = None
-        white_balance = None
-        lens_make = None
-        lens_model = None
-        focal_length = None
-        
-        if exif_data:
-            for tag_id, value in exif_data.items():
-                tag = TAGS.get(tag_id, tag_id)
-                
-                # Device information
-                if tag == 'Make':
-                    device_brand = str(value).strip()
-                elif tag == 'Model':
-                    device_model = str(value).strip()
-                elif tag == 'ISOSpeedRatings' or tag == 'ISO':
-                    iso_value = value
-                elif tag == 'ExposureTime':
-                    exposure_time = value
-                elif tag == 'WhiteBalance':
-                    white_balance = value
-                # Look for HostComputer tag which often contains detailed device info
-                elif tag == 'HostComputer':
-                    host_info = str(value).strip()
-                    if 'iphone' in host_info.lower():
-                        device_brand = "Apple"
-                        device_model = host_info  # Use the full HostComputer string
-        
-        # Try additional methods for HEIC files to get device info
-        if device_brand == "Unknown" and device_model == "Unknown" and str(image_path).lower().endswith('.heic'):
-            try:
-                # Try to get more detailed metadata for HEIC files                
-                # Get all possible metadata
-                info = img.getexif()
-                if info:
-                    # Look through all tags more thoroughly
-                    for tag_id in info:
-                        tag = TAGS.get(tag_id, tag_id)
-                        value = info[tag_id]
-                        
-                        # Check various fields that might contain device info
-                        if any(keyword in str(tag).lower() for keyword in ['make', 'brand', 'manufacturer']):
-                            if 'apple' in str(value).lower():
-                                device_brand = "Apple"
-                        elif any(keyword in str(tag).lower() for keyword in ['model', 'camera', 'lens']):
-                            if 'iphone' in str(value).lower():
-                                device_brand = "Apple"
-                                # Try to extract specific iPhone model
-                                value_str = str(value).lower()
-                                if '15 pro max' in value_str:
-                                    device_model = "iPhone 15 Pro Max"
-                                elif '15 pro' in value_str:
-                                    device_model = "iPhone 15 Pro"  
-                                elif '15' in value_str:
-                                    device_model = "iPhone 15"
-                                elif '14 pro max' in value_str:
-                                    device_model = "iPhone 14 Pro Max"
-                                elif '14 pro' in value_str:
-                                    device_model = "iPhone 14 Pro"
-                                elif '14' in value_str:
-                                    device_model = "iPhone 14"
-                                else:
-                                    device_model = "iPhone"
-                                    
-                print(f"After HEIC analysis: {device_brand} {device_model}")
-            except Exception as e:
-                print(f"HEIC metadata extraction failed: {e}")
-        
-        # If still no EXIF data found, try to infer from filename or use reasonable defaults
-        if device_brand == "Unknown" and device_model == "Unknown":
-            filename = image_path.name.lower()
+        if device_model and 'iphone' in device_model.lower():
+            # Extract specific iPhone model
+            model_lower = device_model.lower()
             
-            # Try to infer device from common patterns
-            if any(x in filename for x in ['iphone', 'apple']):
+            if '15 pro max' in model_lower:
+                device_model = "iPhone 15 Pro Max"
+            elif '15 pro' in model_lower:
+                device_model = "iPhone 15 Pro"
+            elif '15 plus' in model_lower:
+                device_model = "iPhone 15 Plus"
+            elif '15' in model_lower:
+                device_model = "iPhone 15"
+            elif '14 pro max' in model_lower:
+                device_model = "iPhone 14 Pro Max"
+            elif '14 pro' in model_lower:
+                device_model = "iPhone 14 Pro"
+            elif '14 plus' in model_lower:
+                device_model = "iPhone 14 Plus"
+            elif '14' in model_lower:
+                device_model = "iPhone 14"
+            elif '13 pro max' in model_lower:
+                device_model = "iPhone 13 Pro Max"
+            elif '13 pro' in model_lower:
+                device_model = "iPhone 13 Pro"
+            elif '13' in model_lower:
+                device_model = "iPhone 13"
+            # Keep original if specific model not detected
+        
+        # If still unknown after all extraction attempts
+        if device_brand == "Unknown" or device_model == "Unknown":
+            print(f"  WARNING: Could not extract device info from EXIF")
+            print(f"  Current: {device_brand} {device_model}")
+            
+            # Last resort: check filename
+            filename_lower = image_path.name.lower()
+            if 'iphone' in filename_lower:
                 device_brand = "Apple"
-                device_model = "iPhone"
-            elif any(x in filename for x in ['samsung', 'galaxy']):
-                device_brand = "Samsung" 
-                device_model = "Galaxy"
-            elif any(x in filename for x in ['pixel', 'google']):
-                device_brand = "Google"
-                device_model = "Pixel"
-            else:
-                # For medical imaging, assume mobile device
-                device_brand = "Mobile"
-                device_model = "Camera"
-                
-        # Set required metadata fields
+                device_model = "iPhone (unknown model)"
+        
+        # Build device_id
         device_id_parts = [device_brand, device_model]
         if camera_type != "unknown":
             device_id_parts.append(camera_type)
@@ -246,15 +267,28 @@ def extract_exif_metadata(image_path):
         metadata['device_id'] = "_".join(device_id_parts).replace(" ", "_")
         metadata['device_brand'] = device_brand
         metadata['device_model'] = device_model
-        metadata['camera_type'] = camera_type  # NEW FIELD
+        metadata['camera_type'] = camera_type
         
-        # Add lens info if available
+        # Lens info
         if lens_make or lens_model:
             metadata['lens_info'] = f"{lens_make or ''} {lens_model or ''}".strip()
         else:
             metadata['lens_info'] = "unknown"
         
-        # Create ISO bucket (with reasonable defaults for mobile photos)
+        # Focal length
+        if focal_length:
+            try:
+                if isinstance(focal_length, tuple):
+                    fl_value = focal_length[0] / focal_length[1]
+                else:
+                    fl_value = float(focal_length)
+                metadata['focal_length_mm'] = round(fl_value, 2)
+            except:
+                metadata['focal_length_mm'] = "unknown"
+        else:
+            metadata['focal_length_mm'] = "unknown"
+        
+        # ISO bucket
         if iso_value:
             try:
                 iso_val = int(iso_value) if not isinstance(iso_value, (list, tuple)) else int(iso_value[0])
@@ -265,18 +299,17 @@ def extract_exif_metadata(image_path):
                 else:
                     metadata['iso_bucket'] = "high"
             except:
-                metadata['iso_bucket'] = "unknown"
+                metadata['iso_bucket'] = "medium"
         else:
-            # Most mobile photos are taken in medium lighting conditions
             metadata['iso_bucket'] = "medium"
         
-        # Create exposure bucket (with reasonable defaults)
+        # Exposure bucket
         if exposure_time:
             try:
                 if isinstance(exposure_time, tuple):
                     exp_val = exposure_time[0] / exposure_time[1]
-                elif isinstance(exposure_time, str) and '/' in exposure_time:
-                    parts = exposure_time.split('/')
+                elif isinstance(exposure_time, str) and '/' in str(exposure_time):
+                    parts = str(exposure_time).split('/')
                     exp_val = float(parts[0]) / float(parts[1])
                 else:
                     exp_val = float(exposure_time)
@@ -288,63 +321,64 @@ def extract_exif_metadata(image_path):
                 else:
                     metadata['exposure_bucket'] = "fast"
             except:
-                metadata['exposure_bucket'] = "unknown"
+                metadata['exposure_bucket'] = "medium"
         else:
-            # Most mobile photos use automatic exposure
             metadata['exposure_bucket'] = "medium"
         
-        # Create white balance bucket (with reasonable defaults)
-        if white_balance:
-            if white_balance == 0:
+        # White balance
+        if white_balance is not None:
+            try:
+                wb_val = int(white_balance)
+                if wb_val == 0:
+                    metadata['wb_bucket'] = "auto"
+                elif wb_val == 1:
+                    metadata['wb_bucket'] = "manual"
+                else:
+                    metadata['wb_bucket'] = "other"
+            except:
                 metadata['wb_bucket'] = "auto"
-            elif white_balance == 1:
-                metadata['wb_bucket'] = "daylight"
-            else:
-                metadata['wb_bucket'] = "manual"
         else:
-            # Most mobile phones use auto white balance
             metadata['wb_bucket'] = "auto"
         
-        # Try to infer some fields from filename patterns
+        # Infer contextual metadata
         filename_lower = image_path.name.lower()
         
-        # Ambient light inference (medical imaging context)
-        metadata['ambient_light'] = "indoor"  # Medical imaging typically indoor
+        metadata['ambient_light'] = "indoor"
+        metadata['distance_band'] = "close"
         
-        # Distance band inference (lip close-ups)
-        metadata['distance_band'] = "close"  # Lip images are typically close-up
-        
-        # Skin tone proxy - try to infer from filename if available
+        # Skin tone inference from filename
         if 'chinese' in filename_lower or 'asian' in filename_lower:
-            metadata['skin_tone_proxy'] = "III-IV"  # Typical range for East Asian
+            metadata['skin_tone_proxy'] = "III-IV"
         elif 'middleeastern' in filename_lower or 'middle' in filename_lower:
-            metadata['skin_tone_proxy'] = "IV-V"  # Typical range for Middle Eastern
-        elif 'african' in filename_lower or 'dark' in filename_lower:
-            metadata['skin_tone_proxy'] = "V-VI"  # Darker skin tones
+            metadata['skin_tone_proxy'] = "IV-V"
+        elif 'african' in filename_lower:
+            metadata['skin_tone_proxy'] = "V-VI"
         elif 'european' in filename_lower or 'caucasian' in filename_lower:
-            metadata['skin_tone_proxy'] = "I-III"  # Lighter skin tones
+            metadata['skin_tone_proxy'] = "I-III"
         else:
-            metadata['skin_tone_proxy'] = "unknown"  # Cannot determine
+            metadata['skin_tone_proxy'] = "unknown"
         
-        # Age and gender remain unknown without manual annotation
-        metadata['age_band'] = "unknown"  # Need manual annotation
-        metadata['gender'] = "unknown"  # Need manual annotation
+        metadata['age_band'] = "unknown"
+        metadata['gender'] = "unknown"
         
     except Exception as e:
-        print(f"Warning: Could not extract EXIF from {image_path.name}: {e}")
+        print(f"  ERROR extracting metadata: {e}")
+        import traceback
+        traceback.print_exc()
+        
         metadata.update({
             'device_id': "unknown",
-            'device_brand': "unknown", 
+            'device_brand': "unknown",
             'device_model': "unknown",
             'camera_type': "unknown",
             'lens_info': "unknown",
-            'iso_bucket': "unknown",
-            'exposure_bucket': "unknown", 
-            'wb_bucket': "unknown",
+            'iso_bucket': "medium",
+            'exposure_bucket': "medium",
+            'wb_bucket': "auto",
             'focal_length_mm': "unknown",
-            'ambient_light': "unknown",
-            'distance_band': "unknown",
-            'skin_tone_proxy': "unknown", 
+            'ambient_light': "indoor",
+            'distance_band': "close",
+            'skin_tone_proxy': "unknown",
             'age_band': "unknown",
             'gender': "unknown"
         })
@@ -378,15 +412,14 @@ def create_metadata_csv(image_folder, output_path='meta.csv'):
             print(f"  Device: {metadata['device_brand']} {metadata['device_model']}")
         if metadata['camera_type'] != "unknown":
             print(f"  Camera: {metadata['camera_type']}")
-        if metadata['lens_info'] != "unknown":
-            print(f"  Lens: {metadata['lens_info']}")
         
         metadata_list.append(metadata)
+        print()
     
     # Create DataFrame
     df = pd.DataFrame(metadata_list)
     
-    # Define column order - now includes new fields
+    # Define column order
     expected_columns = [
         'image_id', 'device_id', 'device_brand', 'device_model', 
         'camera_type', 'lens_info', 'focal_length_mm',
@@ -408,10 +441,10 @@ def create_metadata_csv(image_folder, output_path='meta.csv'):
     print(f"Total images: {len(df)}")
     print(f"{'='*60}\n")
     
-    # Show sample with key fields
+    # Show sample
     if len(df) > 0:
         print("Sample metadata:")
-        print(df[['image_id', 'device_brand', 'device_model', 'camera_type', 'focal_length_mm']].head(3).to_string())
+        print(df[['image_id', 'device_brand', 'device_model', 'camera_type']].head(3).to_string())
     
     return df
 
@@ -431,7 +464,6 @@ def create_combined_dataset(image_folder, labels_csv,
     print(f"\n{'='*60}")
     print(f"Created {output_csv}")
     print(f"Total samples: {len(combined_df)}")
-    print(f"Columns: {list(combined_df.columns)}")
     print(f"{'='*60}\n")
     
     return combined_df
@@ -446,28 +478,28 @@ if __name__ == "__main__":
     print("="*60)
     print()
     
-    # SET YOUR IMAGE FOLDER PATH HERE
-    IMAGE_FOLDER = r"C:\Users\kylie\Documents\SMU Y3S1\DSA Case Competition 2025\1. Randomised Files"
+    # Define paths - CHANGE THIS TO YOUR IMAGE FOLDER
+    IMAGE_FOLDER = Path(r"../data/images")
     
-    # CREATE DATA FOLDER FOR OUTPUT
+    # Create data folder structure
     DATA_FOLDER = Path(__file__).parent.parent / "data"
-    DATA_FOLDER.mkdir(exist_ok=True)
-    print(f"Output folder: {DATA_FOLDER}")
     
-    # Check and create data folder structure
+    # Check and create data folder if it doesn't exist
     if not DATA_FOLDER.exists():
         print(f"Creating data folder: {DATA_FOLDER}")
         DATA_FOLDER.mkdir(parents=True, exist_ok=True)
-        print("✓ Data folder created")
+        print("✓ Data folder created\n")
     else:
-        print(f"✓ Data folder exists: {DATA_FOLDER}")
+        print(f"✓ Data folder exists: {DATA_FOLDER}\n")
     
     # Check if images folder exists
     if not IMAGE_FOLDER.exists():
-        print(f"\nERROR: Images folder not found: {IMAGE_FOLDER}")
-        print("Please create the folder and place your images there:")
-        print(f"  mkdir {IMAGE_FOLDER}")
+        print(f"ERROR: Images folder not found: {IMAGE_FOLDER}")
+        print("Please update IMAGE_FOLDER path in the script.")
         exit(1)
+    
+    print(f"Reading images from: {IMAGE_FOLDER}")
+    print(f"Output folder: {DATA_FOLDER}\n")
     
     # Define output paths in data folder
     labels_path = DATA_FOLDER / "labels.csv"
@@ -477,24 +509,21 @@ if __name__ == "__main__":
     # STEP 1: Extract labels
     print("\n[STEP 1] Extracting HgB labels from filenames...")
     print("-" * 60)
-    labels_df = create_labels_csv(IMAGE_FOLDER, output_path=DATA_FOLDER / 'labels.csv')
+    labels_df = create_labels_csv(IMAGE_FOLDER, output_path=labels_path)
     
     # STEP 2: Extract metadata
     print("\n[STEP 2] Extracting image metadata...")
     print("-" * 60)
-    metadata_df = create_metadata_csv(
-        IMAGE_FOLDER, 
-        output_path=DATA_FOLDER / 'meta.csv'
-    )
+    metadata_df = create_metadata_csv(IMAGE_FOLDER, output_path=meta_path)
     
     # STEP 3: Create combined dataset
     print("\n[STEP 3] Creating combined dataset...")
     print("-" * 60)
     combined_df = create_combined_dataset(
         IMAGE_FOLDER,
-        labels_csv=DATA_FOLDER / 'labels.csv',
-        metadata_csv=DATA_FOLDER / 'meta.csv',
-        output_csv=DATA_FOLDER / 'combined_data.csv'
+        labels_csv=labels_path,
+        metadata_csv=meta_path,
+        output_csv=combined_path
     )
     
     # Summary
@@ -502,8 +531,8 @@ if __name__ == "__main__":
     print("EXTRACTION COMPLETE!")
     print("="*60)
     print(f"\nFiles created in {DATA_FOLDER}:")
-    print("  1. labels.csv - HgB labels for each image (image_id, hgb)")
-    print("  2. meta.csv - Image metadata following competition convention")
-    print("  3. combined_data.csv - Combined labels + metadata")
-    print("\nYou can now use these CSV files for your analysis!")
+    print(f"  1. {labels_path.name} - HgB labels for each image")
+    print(f"  2. {meta_path.name} - Image metadata")
+    print(f"  3. {combined_path.name} - Combined labels + metadata")
+    print("\nYou can now use these CSV files for training!")
     print("="*60)

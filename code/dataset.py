@@ -1,3 +1,10 @@
+# Enable HEIC support
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    print("WARNING: pillow-heif not installed. HEIC files will fail.")
+
 import os
 import pandas as pd
 import numpy as np
@@ -9,23 +16,20 @@ from albumentations.pytorch import ToTensorV2
 
 class HemoglobinDataset(Dataset):
     def __init__(self, images_dir, labels_csv, meta_csv=None, transform=None, use_metadata=False):
-        """
-        Args:
-            images_dir: Path to folder containing images
-            labels_csv: Path to CSV with columns [image_id, hgb]
-            meta_csv: Path to CSV with metadata (optional)
-            transform: Albumentations transform
-            use_metadata: Whether to use metadata features
-        """
         self.images_dir = images_dir
         self.labels_df = pd.read_csv(labels_csv)
         self.transform = transform
         self.use_metadata = use_metadata
         
-        if use_metadata and meta_csv is not None:
+        if use_metadata and meta_csv is not None and os.path.exists(meta_csv):
             self.meta_df = pd.read_csv(meta_csv)
             self.labels_df = self.labels_df.merge(self.meta_df, on='image_id')
-            self.metadata_cols = [col for col in self.meta_df.columns if col != 'image_id']
+            
+            # Only use numeric/encoded metadata columns
+            self.metadata_cols = []
+            for col in self.meta_df.columns:
+                if col != 'image_id' and self.meta_df[col].dtype in ['int64', 'float64']:
+                    self.metadata_cols.append(col)
         else:
             self.metadata_cols = []
     
@@ -35,21 +39,28 @@ class HemoglobinDataset(Dataset):
     def __getitem__(self, idx):
         row = self.labels_df.iloc[idx]
         
-        # Load image
-        img_name = f"{row['image_id']}.jpg"
-        img_path = os.path.join(self.images_dir, img_name)
+        # Find image with correct extension
+        image_id = row['image_id']
+        img_path = None
+        
+        for ext in ['.jpg', '.jpeg', '.png', '.heic', '.HEIC', '.JPG', '.JPEG', '.PNG']:
+            potential_path = os.path.join(self.images_dir, f"{image_id}{ext}")
+            if os.path.exists(potential_path):
+                img_path = potential_path
+                break
+        
+        if img_path is None:
+            raise FileNotFoundError(f"Image not found: {image_id}")
+        
         image = Image.open(img_path).convert('RGB')
         image = np.array(image)
         
-        # Apply transforms
         if self.transform:
             transformed = self.transform(image=image)
             image = transformed['image']
         
-        # Get label
         hgb = torch.tensor(row['hgb'], dtype=torch.float32)
         
-        # Get metadata if using
         if self.use_metadata and len(self.metadata_cols) > 0:
             metadata = torch.tensor(row[self.metadata_cols].values, dtype=torch.float32)
             return image, metadata, hgb
@@ -57,7 +68,6 @@ class HemoglobinDataset(Dataset):
         return image, hgb
 
 def get_transforms(train=True):
-    """Get image transforms"""
     if train:
         return A.Compose([
             A.Resize(224, 224),
