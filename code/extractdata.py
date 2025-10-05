@@ -12,6 +12,15 @@ from PIL.ExifTags import TAGS
 import cv2
 import numpy as np
 
+# Enable HEIC support
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    print("HEIC support enabled")
+except ImportError:
+    print("pillow-heif not installed. HEIC files may not work properly.")
+    print("Install with: pip install pillow-heif")
+
 def extract_hgb_from_filename(filename):
     """
     Extract HgB value from various filename patterns.
@@ -106,14 +115,38 @@ def extract_exif_metadata(image_path):
     try:
         img = Image.open(image_path)
         
-        # Handle different EXIF extraction methods
+        # Handle different EXIF extraction methods, especially for HEIC
         exif_data = None
-        if hasattr(img, '_getexif') and img._getexif():
-            exif_data = img._getexif()
-        elif hasattr(img, 'getexif'):
+        
+        # Method 1: Try modern getexif() first (better for HEIC)
+        try:
             exif_dict = img.getexif()
             if exif_dict:
                 exif_data = dict(exif_dict)
+                print(f"Found {len(exif_data)} EXIF tags using getexif()")
+        except:
+            pass
+            
+        # Method 2: Try legacy _getexif() as fallback
+        if not exif_data:
+            try:
+                legacy_exif = img._getexif()
+                if legacy_exif:
+                    exif_data = legacy_exif
+                    print(f"Found {len(exif_data)} EXIF tags using _getexif()")
+            except:
+                pass
+        
+        # Method 3: Try to get all available info including lens data
+        try:
+            # Get additional metadata that might contain lens info
+            if hasattr(img, 'tag'):
+                additional_data = img.tag
+                if additional_data and not exif_data:
+                    exif_data = additional_data
+                    print(f"Found metadata using img.tag")
+        except:
+            pass
         
         # Initialize with default values
         device_brand = "Unknown"
@@ -135,8 +168,54 @@ def extract_exif_metadata(image_path):
                     exposure_time = value
                 elif tag == 'WhiteBalance':
                     white_balance = value
+                # Look for HostComputer tag which often contains detailed device info
+                elif tag == 'HostComputer':
+                    host_info = str(value).strip()
+                    if 'iphone' in host_info.lower():
+                        device_brand = "Apple"
+                        device_model = host_info  # Use the full HostComputer string
         
-        # If no EXIF data found, try to infer from filename or use reasonable defaults
+        # Try additional methods for HEIC files to get device info
+        if device_brand == "Unknown" and device_model == "Unknown" and str(image_path).lower().endswith('.heic'):
+            try:
+                # Try to get more detailed metadata for HEIC files                
+                # Get all possible metadata
+                info = img.getexif()
+                if info:
+                    # Look through all tags more thoroughly
+                    for tag_id in info:
+                        tag = TAGS.get(tag_id, tag_id)
+                        value = info[tag_id]
+                        
+                        # Check various fields that might contain device info
+                        if any(keyword in str(tag).lower() for keyword in ['make', 'brand', 'manufacturer']):
+                            if 'apple' in str(value).lower():
+                                device_brand = "Apple"
+                        elif any(keyword in str(tag).lower() for keyword in ['model', 'camera', 'lens']):
+                            if 'iphone' in str(value).lower():
+                                device_brand = "Apple"
+                                # Try to extract specific iPhone model
+                                value_str = str(value).lower()
+                                if '15 pro max' in value_str:
+                                    device_model = "iPhone 15 Pro Max"
+                                elif '15 pro' in value_str:
+                                    device_model = "iPhone 15 Pro"  
+                                elif '15' in value_str:
+                                    device_model = "iPhone 15"
+                                elif '14 pro max' in value_str:
+                                    device_model = "iPhone 14 Pro Max"
+                                elif '14 pro' in value_str:
+                                    device_model = "iPhone 14 Pro"
+                                elif '14' in value_str:
+                                    device_model = "iPhone 14"
+                                else:
+                                    device_model = "iPhone"
+                                    
+                print(f"After HEIC analysis: {device_brand} {device_model}")
+            except Exception as e:
+                print(f"HEIC metadata extraction failed: {e}")
+        
+        # If still no EXIF data found, try to infer from filename or use reasonable defaults
         if device_brand == "Unknown" and device_model == "Unknown":
             filename = image_path.name.lower()
             
@@ -151,7 +230,7 @@ def extract_exif_metadata(image_path):
                 device_brand = "Google"
                 device_model = "Pixel"
             else:
-                # Use generic mobile device for medical imaging context
+                # For medical imaging, assume mobile device
                 device_brand = "Mobile"
                 device_model = "Camera"
                 
@@ -405,6 +484,11 @@ if __name__ == "__main__":
     # SET YOUR IMAGE FOLDER PATH HERE
     IMAGE_FOLDER = r"C:\Users\kylie\Documents\SMU Y3S1\DSA Case Competition 2025\1. Randomised Files"
     
+    # CREATE DATA FOLDER FOR OUTPUT
+    DATA_FOLDER = Path(__file__).parent.parent / "data"
+    DATA_FOLDER.mkdir(exist_ok=True)
+    print(f"Output folder: {DATA_FOLDER}")
+    
     # Check if folder exists
     if not os.path.exists(IMAGE_FOLDER):
         print(f"ERROR: Folder not found: {IMAGE_FOLDER}")
@@ -414,14 +498,14 @@ if __name__ == "__main__":
     # STEP 1: Extract labels
     print("\n[STEP 1] Extracting HgB labels from filenames...")
     print("-" * 60)
-    labels_df = create_labels_csv(IMAGE_FOLDER, output_path='labels.csv')
+    labels_df = create_labels_csv(IMAGE_FOLDER, output_path=DATA_FOLDER / 'labels.csv')
     
     # STEP 2: Extract metadata
     print("\n[STEP 2] Extracting image metadata...")
     print("-" * 60)
     metadata_df = create_metadata_csv(
         IMAGE_FOLDER, 
-        output_path='meta.csv'
+        output_path=DATA_FOLDER / 'meta.csv'
     )
     
     # STEP 3: Create combined dataset
@@ -429,16 +513,16 @@ if __name__ == "__main__":
     print("-" * 60)
     combined_df = create_combined_dataset(
         IMAGE_FOLDER,
-        labels_csv='labels.csv',
-        metadata_csv='meta.csv',
-        output_csv='combined_data.csv'
+        labels_csv=DATA_FOLDER / 'labels.csv',
+        metadata_csv=DATA_FOLDER / 'meta.csv',
+        output_csv=DATA_FOLDER / 'combined_data.csv'
     )
     
     # Summary
     print("\n" + "="*60)
     print("EXTRACTION COMPLETE!")
     print("="*60)
-    print("\nFiles created:")
+    print(f"\nFiles created in {DATA_FOLDER}:")
     print("  1. labels.csv - HgB labels for each image (image_id, hgb)")
     print("  2. meta.csv - Image metadata following competition convention")
     print("  3. combined_data.csv - Combined labels + metadata")
