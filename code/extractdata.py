@@ -67,11 +67,15 @@ def create_labels_csv(image_folder, output_path='labels.csv'):
     
     labels_data = []
     
-    # Find all image files (including HEIC)
-    image_extensions = ['.jpg', '.jpeg', '.png', '.heic', '.JPG', '.JPEG', '.PNG', '.HEIC']
+    # Find all image files (including HEIC) - use case-insensitive matching
     image_files = []
-    for ext in image_extensions:
-        image_files.extend(list(image_folder.glob(f'*{ext}')))
+    for pattern in ['*.jpg', '*.jpeg', '*.png', '*.heic']:
+        # Add both lowercase and uppercase matches
+        image_files.extend(list(image_folder.glob(pattern)))
+        image_files.extend(list(image_folder.glob(pattern.upper())))
+    
+    # Remove duplicates that might occur from case variations
+    image_files = list(set(image_files))
     
     print(f"Found {len(image_files)} image files")
     
@@ -393,11 +397,15 @@ def create_metadata_csv(image_folder, output_path='meta.csv'):
     
     metadata_list = []
     
-    # Find all image files (including HEIC)
-    image_extensions = ['.jpg', '.jpeg', '.png', '.heic', '.JPG', '.JPEG', '.PNG', '.HEIC']
+    # Find all image files (including HEIC) - use case-insensitive matching
     image_files = []
-    for ext in image_extensions:
-        image_files.extend(list(image_folder.glob(f'*{ext}')))
+    for pattern in ['*.jpg', '*.jpeg', '*.png', '*.heic']:
+        # Add both lowercase and uppercase matches
+        image_files.extend(list(image_folder.glob(pattern)))
+        image_files.extend(list(image_folder.glob(pattern.upper())))
+    
+    # Remove duplicates that might occur from case variations
+    image_files = list(set(image_files))
     
     print(f"Extracting metadata from {len(image_files)} images...\n")
     
