@@ -66,22 +66,12 @@ This generates:
 - `data/meta.csv` - Camera metadata (device, ISO, exposure, etc.)
 - `data/combined_data.csv` - Complete dataset
 
-### 4. Handle HEIC Files (If Applicable)
-
-If your images are in HEIC format, convert them to JPG:
-```bash
-cd code
-python convert_heic.py
-```
-
-This converts all `.heic` files in `data/images/` to `.jpg` format.
-
 ## Model Training & Evaluation Pipeline
 
 ### Step 1: Train the Model
 ```bash
 cd code
-python train.py --epochs 50 --batch_size 4
+python train.py --epochs 50 --batch_size 2
 ```
 
 **Training options:**
