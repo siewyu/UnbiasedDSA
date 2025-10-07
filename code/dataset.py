@@ -116,16 +116,14 @@ class HemoglobinDataset(Dataset):
 def get_transforms(train=True, size=192):
     # Simplified, color-stable augmentations (good for tiny datasets)
     if train:
-        return A.Compose(
-            [
+        return A.Compose([
                 A.Resize(size, size),
-                A.RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.1, p=0.3),
-                A.GaussianBlur(blur_limit=(3, 5), p=0.2),
                 A.HorizontalFlip(p=0.5),
+                A.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1, hue=0.05, p=0.4),
+                A.GaussianBlur(blur_limit=(3, 5), p=0.2),
                 A.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
                 ToTensorV2(),
-            ]
-        )
+            ])
     else:
         return A.Compose(
             [

@@ -36,7 +36,7 @@ class HemoglobinEstimator(nn.Module):
             self.meta_encoder = nn.Sequential(
                 nn.Linear(metadata_dim, 64),
                 nn.ReLU(),
-                nn.Dropout(0.25),
+                nn.Dropout(0.35),
             )
             fuse_dim = feature_dim + 64
         else:
