@@ -86,7 +86,7 @@ python train.py --epochs 50 --batch_size 4
 
 **Training options:**
 - `--epochs`: Number of training epochs (default: 50)
-- `--batch_size`: Batch size (default: 4)
+- `--batch_size`: Batch size (default: 2)
 - `--lr`: Learning rate (default: 1e-4)
 - `--images_dir`: Path to images (default: ../data/images)
 - `--labels_csv`: Path to labels (default: ../data/labels.csv)

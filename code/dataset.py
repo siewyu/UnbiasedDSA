@@ -67,11 +67,15 @@ class HemoglobinDataset(Dataset):
         
         return image, hgb
 
+#Use CLAHE preprocessing for better results
 def get_transforms(train=True):
     if train:
         return A.Compose([
             A.Resize(224, 224),
+            A.CLAHE(clip_limit=2.0, tile_grid_size=(8, 8), p=1.0),  # ADD THIS LINE
             A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),  # ADD THIS LINE
+            A.Rotate(limit=30, p=0.5),  # ADD THIS LINE  
             A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
             A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=20, val_shift_limit=10, p=0.5),
             A.GaussNoise(var_limit=(10.0, 30.0), p=0.3),
@@ -81,6 +85,7 @@ def get_transforms(train=True):
     else:
         return A.Compose([
             A.Resize(224, 224),
+            A.CLAHE(clip_limit=2.0, tile_grid_size=(8, 8), p=1.0),  # ADD THIS LINE
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ToTensorV2(),
         ])
