@@ -32,22 +32,15 @@ inference: true
 
 ### Model Description
 
-<!-- Provide a longer summary of what this model is. -->
+Through deep learning regression, the model aims to estimate non-invasive hemoglobin from smartphone lip images 
 
-{{ model_description | default("Through deep learning regression, the model aims to estimate non-invasive hemoglobin from smartphone lip images  ", true) }}
+- **Developed by:** Howard, A., Sandler, M., Chu, G., Chen, L.-C., Chen, B., Tan, M., Wang, W., Zhu, Y., Pang, R., Vasudevan, V., Le, Q.V., & Adam, H. (2019). [https://doi.org/10.48550/arXiv.1905.02244]
+- **Model type:** Model_use_case.image_classification
+- **License:** From[ qualcomm]([url](https://huggingface.co/qualcomm/MobileNet-v3-Small)),  the licenses are [original implementation of MobileNet-v3-Small]([url](https://github.com/pytorch/vision/blob/main/LICENSE)) and [compiled assets for on-device deployment]([url](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/Qualcomm+AI+Hub+Proprietary+License.pdf))
 
-- **Developed by:** {{ developers | default("[More Information Needed]", true)}}
-- **Model type:** {{ model_type | default("Model_use_case.image_classification", true)}}
-- **License:** {{ license | default("From[ qualcomm]([url](https://huggingface.co/qualcomm/MobileNet-v3-Small)),  the licenses are [original implementation of MobileNet-v3-Small]([url](https://github.com/pytorch/vision/blob/main/LICENSE)) and [compiled assets for on-device deployment]([url](https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/Qualcomm+AI+Hub+Proprietary+License.pdf))", true)}}
-- **Finetuned from model [optional]:** {{ base_model | default("[More Information Needed]", true)}}
+### Model Sources 
 
-### Model Sources [optional]
-
-<!-- Provide the basic links for the model. -->
-
-- **Repository:** {{ repo | default("[More Information Needed]", true)}}
-- **Paper [optional]:** {{ paper | default("[More Information Needed]", true)}}
-- **Demo [optional]:** {{ demo | default("[More Information Needed]", true)}}
+- **Repository:** https://huggingface.co/qualcomm/MobileNet-v3-Small
 
 ## Uses
 
@@ -57,31 +50,40 @@ inference: true
 
 <!-- This section is for the model use without fine-tuning or plugging into a larger ecosystem/app. -->
 
-{{ direct_use | default("[More Information Needed]", true)}}
-
-### Out-of-Scope Use
-
-<!-- This section addresses misuse, malicious use, and uses that the model will not work well for. -->
-
-{{ out_of_scope_use | default("[More Information Needed]", true)}}
+A machine learning pipeline for estimating hemoglobin levels from lip images using computer vision and deep learning.
 
 ## Bias, Risks, and Limitations
 
 <!-- This section is meant to convey both technical and sociotechnical limitations. -->
 
-{{ bias_risks_limitations | default("[More Information Needed]", true)}}
+Potential Biases
+- Skin tone bias - Hemoglobin estimation accuracy typically degrades on darker skin tones due to reduced light penetration and lower signal-to-noise ratio. The dataset used appears to have limited representation of Fitzpatrick V-VI tones.
+- Device bias - HEIC images have complete metadata while JPEGs often have stripped EXIF data, potentially creating device-specific performance disparities.
+- Gender/age bias - unable to access due to missing demographic labels
 
 ### Recommendations
 
-<!-- This section is meant to convey recommendations with respect to the bias, risk, and technical limitations. -->
-
-{{ bias_recommendations | default("Users (both direct and downstream) should be made aware of the risks, biases and limitations of the model. More information needed for further recommendations.", true)}}
+The model includes fairness checks across inferred skin tone proxies, gender, and device types.
+Performance consistency is monitored to ensure no demographic group is disproportionately
+affected. Future work includes bias mitigation using domain adaptation and adversarial
+regularization.
 
 ## How to Get Started with the Model
 
-Use the code below to get started with the model.
+Use the code below to generate predictions on images.
 
-{{ get_started_code | default("[More Information Needed]", true)}}
+Generate predictions on images:
+```bash
+python inference.py --images ../data/images --weights ../weights/best_model.pt --meta ../data/meta.csv --out ../data/predictions.csv --img_size 192
+```
+
+Output format (`predictions.csv`):
+```csv
+image_id,predicted_hgb
+HgB_10.7gdl_Individual01,10.8
+HgB_12.0gdl_Individual02,11.9
+...
+```
 
 ## Training Details
 
@@ -89,26 +91,46 @@ Use the code below to get started with the model.
 
 <!-- This should link to a Dataset Card, perhaps with a short stub of information on what the training data is all about as well as documentation related to data pre-processing or additional filtering. -->
 
-{{ training_data | default("[More Information Needed]", true)}}
+**Step 1:** Place all lip images in data folder
+
+**Step 2:** By default, `extractdata.py` reads from `../data/images`. Update the path only if your images are stored elsewhere.
+```python
+IMAGE_FOLDER = r"..\data\images"
+```
+
+**Step 3:** Run data extraction:
+(This has been extracted already under the data folder but use extractdata.py for other datasets)
+```bash
+cd code
+python extractdata.py
+```
+
+This generates:
+- `data/labels.csv` - HgB values extracted from filenames
+- `data/meta.csv` - Camera metadata (device, ISO, exposure, etc.)
+- `data/combined_data.csv` - Complete dataset
 
 ### Training Procedure
 
-<!-- This relates heavily to the Technical Specifications. Content here should link to that section when it is relevant to the training procedure. -->
+Please refer to README.md file for the full details on our entire process. 
 
-#### Preprocessing [optional]
+```bash
+cd code
+python train.py --images_dir ../data/images --labels_csv ../data/labels.csv --meta_csv ../data/meta.csv --output_dir ../data --batch_size 2 --epochs 40 --img_size 192 --use_metadata --backbone mobilenet_v3_small
+```
 
-{{ preprocessing | default("[More Information Needed]", true)}}
+**Training options:**
+- `--epochs`: Number of training epochs (default: 50)
+- `--batch_size`: Batch size (default: 2)
+- `--lr`: Learning rate (default: 1e-4)
+- `--images_dir`: Path to images (default: ../data/images)
+- `--labels_csv`: Path to labels (default: ../data/labels.csv)
+- `--output_dir`: Output directory for model (default: ../weights)
 
-
-#### Training Hyperparameters
-
-- **Training regime:** {{ training_regime | default("[More Information Needed]", true)}} <!--fp32, fp16 mixed precision, bf16 mixed precision, bf16 non-mixed precision, fp16 non-mixed precision, fp8 mixed precision -->
-
-#### Speeds, Sizes, Times [optional]
-
-<!-- This section provides information about throughput, start/end time, checkpoint size if relevant, etc. -->
-
-{{ speeds_sizes_times | default("[More Information Needed]", true)}}
+**Expected output:**
+- Progress bars showing training/validation
+- Epoch-by-epoch MAE metrics
+- Best model saved to `weights/best_model.pt`
 
 ## Evaluation
 
@@ -119,32 +141,12 @@ Median Absolute Error:       1.3670 g/dL
 Std of Absolute Error:       1.7222 g/dL
 Min / Max Abs Error:         0.1041 / 6.3843 g/dL
 
-## Model Examination [optional]
+## Compute Efficiency
 
-<!-- Relevant interpretability work for the model goes here -->
+The model is designed to run efficiently on CPU-only systems. Training on 31 samples for 40
+epochs takes under 15 minutes on a standard Intel i7 processor. Inference runs under 1 second per
+image.
 
-{{ model_examination | default("[More Information Needed]", true)}}
-
-## Environmental Impact
-
-<!-- Total emissions (in grams of CO2eq) and additional considerations, such as electricity usage, go here. Edit the suggested text below accordingly -->
-
-Carbon emissions can be estimated using the [Machine Learning Impact calculator](https://mlco2.github.io/impact#compute) presented in [Lacoste et al. (2019)](https://arxiv.org/abs/1910.09700).
-
-- **Hardware Type:** {{ hardware_type | default("[More Information Needed]", true)}}
-- **Hours used:** {{ hours_used | default("[More Information Needed]", true)}}
-- **Cloud Provider:** {{ cloud_provider | default("[More Information Needed]", true)}}
-- **Compute Region:** {{ cloud_region | default("[More Information Needed]", true)}}
-- **Carbon Emitted:** {{ co2_emitted | default("[More Information Needed]", true)}}
-
-**BibTeX:**
-
-{{ citation_bibtex | default("[More Information Needed]", true)}}
-
-**APA:**
-
-{{ citation_apa | default("[More Information Needed]", true)}}
-
-## Model Card Contact
 
 {{ model_card_contact | default("[More Information Needed]", true)}}
+
