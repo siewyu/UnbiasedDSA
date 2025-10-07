@@ -44,17 +44,11 @@ Through deep learning regression, the model aims to estimate non-invasive hemogl
 
 ## Uses
 
-<!-- Address questions around how the model is intended to be used, including the foreseeable users of the model and those affected by the model. -->
-
 ### Direct Use
-
-<!-- This section is for the model use without fine-tuning or plugging into a larger ecosystem/app. -->
 
 A machine learning pipeline for estimating hemoglobin levels from lip images using computer vision and deep learning.
 
 ## Bias, Risks, and Limitations
-
-<!-- This section is meant to convey both technical and sociotechnical limitations. -->
 
 Potential Biases
 - Skin tone bias - Hemoglobin estimation accuracy typically degrades on darker skin tones due to reduced light penetration and lower signal-to-noise ratio. The dataset used appears to have limited representation of Fitzpatrick V-VI tones.
@@ -68,7 +62,7 @@ Performance consistency is monitored to ensure no demographic group is dispropor
 affected. Future work includes bias mitigation using domain adaptation and adversarial
 regularization.
 
-## How to Get Started with the Model
+## How to Get Started with the Model [Duplicated from README.md]
 
 Use the code below to generate predictions on images.
 
@@ -149,4 +143,5 @@ image.
 
 
 {{ model_card_contact | default("[More Information Needed]", true)}}
+
 
