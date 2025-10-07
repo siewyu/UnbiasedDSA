@@ -68,13 +68,44 @@ class HemoglobinDataset(Dataset):
         return image, hgb
 
 def get_transforms(train=True):
+    """
+    Refined augmentations for hemoglobin prediction.
+    Key: Preserve color information while adding variability.
+    """
     if train:
         return A.Compose([
             A.Resize(224, 224),
+            
+            # REDUCED: Color shifts affect HgB signal
+            A.HueSaturationValue(
+                hue_shift_limit=5,      # Was 10 - reduced
+                sat_shift_limit=10,     # Was 20 - reduced
+                val_shift_limit=5,      # Was 10 - reduced
+                p=0.3                    # Was 0.5 - reduced frequency
+            ),
+            
+            # REDUCED: Brightness changes affect color perception
+            A.RandomBrightnessContrast(
+                brightness_limit=0.1,    # Was 0.2 - reduced
+                contrast_limit=0.1,      # Was 0.2 - reduced
+                p=0.3                    # Was 0.5 - reduced frequency
+            ),
+            
+            # KEEP: Horizontal flip is safe (lips are symmetric)
             A.HorizontalFlip(p=0.5),
-            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
-            A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=20, val_shift_limit=10, p=0.5),
-            A.GaussNoise(var_limit=(10.0, 30.0), p=0.3),
+            
+            # REDUCED: Less noise
+            A.GaussNoise(var_limit=(5.0, 15.0), p=0.2),  # Was (10.0, 30.0), p=0.3
+            
+            # NEW: Add slight rotation for position variance
+            A.ShiftScaleRotate(
+                shift_limit=0.05,
+                scale_limit=0.05,
+                rotate_limit=5,
+                p=0.3,
+                border_mode=0
+            ),
+            
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ToTensorV2(),
         ])

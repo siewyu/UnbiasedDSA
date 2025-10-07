@@ -23,14 +23,24 @@ class HemoglobinEstimator(nn.Module):
         else:
             combined_dim = feature_dim
         
+        # IMPROVED: More capacity + batch norm for better convergence
         self.regressor = nn.Sequential(
-            nn.Linear(combined_dim, 256),
+            nn.Linear(combined_dim, 512),      # Was 256 - increased
+            nn.BatchNorm1d(512),                # NEW: Batch normalization
             nn.ReLU(),
             nn.Dropout(0.4),
-            nn.Linear(256, 64),
+            
+            nn.Linear(512, 256),                # NEW: Additional layer
+            nn.BatchNorm1d(256),
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(64, 1)
+            
+            nn.Linear(256, 128),                # Was 64 - increased
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            
+            nn.Linear(128, 1)
         )
     
     def forward(self, image, metadata=None):
