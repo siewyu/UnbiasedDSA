@@ -1,46 +1,63 @@
+# model.py
+# MobileNetV3-Small (default) or EfficientNet-B0 with optional metadata branch.
+
 import torch
 import torch.nn as nn
 import torchvision.models as models
 
-class HemoglobinEstimator(nn.Module):
-    def __init__(self, use_metadata=False, metadata_dim=0):
-        super().__init__()
-        
-        # MobileNetV3-Small: lightweight, good for edge deployment
-        self.backbone = models.mobilenet_v3_small(weights='DEFAULT')
+
+def build_backbone(name: str = "mobilenet_v3_small"):
+    name = name.lower()
+    if name in ["mobilenet", "mobilenet_v3_small", "mbv3"]:
+        m = models.mobilenet_v3_small(weights="DEFAULT")
         feature_dim = 576
-        
-        self.backbone.classifier = nn.Identity()
-        
-        self.use_metadata = use_metadata
-        if use_metadata and metadata_dim > 0:
+        m.classifier = nn.Identity()
+        return m, feature_dim
+    elif name in ["efficientnet_b0", "effb0", "efficientnet"]:
+        m = models.efficientnet_b0(weights="DEFAULT")
+        feature_dim = m.classifier[1].in_features  # 1280
+        m.classifier = nn.Identity()
+        return m, feature_dim
+    else:
+        raise ValueError(f"Unknown backbone: {name}")
+
+
+class HemoglobinEstimator(nn.Module):
+    def __init__(self, backbone_name="mobilenet_v3_small", use_metadata=True, metadata_dim=0):
+        super().__init__()
+        self.backbone, feature_dim = build_backbone(backbone_name)
+
+        # full fine-tuning
+        for p in self.backbone.parameters():
+            p.requires_grad = True
+
+        self.use_metadata = use_metadata and metadata_dim > 0
+        if self.use_metadata:
             self.meta_encoder = nn.Sequential(
-                nn.Linear(metadata_dim, 32),
+                nn.Linear(metadata_dim, 64),
                 nn.ReLU(),
-                nn.Dropout(0.3)
+                nn.Dropout(0.25),
             )
-            combined_dim = feature_dim + 32
+            fuse_dim = feature_dim + 64
         else:
-            combined_dim = feature_dim
-        
+            fuse_dim = feature_dim
+
         self.regressor = nn.Sequential(
-            nn.Linear(combined_dim, 256),
+            nn.Linear(fuse_dim, 256),
             nn.ReLU(),
             nn.Dropout(0.4),
             nn.Linear(256, 64),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(64, 1)
+            nn.Dropout(0.2),
+            nn.Linear(64, 1),
         )
-    
+
     def forward(self, image, metadata=None):
-        img_features = self.backbone(image)
-        
+        img_feat = self.backbone(image)
         if self.use_metadata and metadata is not None:
-            meta_features = self.meta_encoder(metadata)
-            combined = torch.cat([img_features, meta_features], dim=1)
+            meta_feat = self.meta_encoder(metadata)
+            feat = torch.cat([img_feat, meta_feat], dim=1)
         else:
-            combined = img_features
-        
-        hgb_pred = self.regressor(combined)
-        return hgb_pred.squeeze()
+            feat = img_feat
+        out = self.regressor(feat)
+        return out.squeeze(1)
