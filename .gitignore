@@ -153,6 +153,3 @@ desktop.ini
 *.pkl
 *.joblib
 *.model
-
-# Trained weights
-best_model.pt
