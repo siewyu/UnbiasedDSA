@@ -153,3 +153,7 @@ desktop.ini
 *.pkl
 *.joblib
 *.model
+
+# Data files
+predictions.csv
+evaluation_results.csv
